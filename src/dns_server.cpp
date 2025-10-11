@@ -1,14 +1,14 @@
 #include "dns_server.hpp"
 #include "util.hpp"
-#include "filter.hpp"
 #include <arpa/inet.h>
-#include <netinet/in.h>
+#include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
 #include <vector>
 
+// DNS hlavička
 #pragma pack(push, 1)
 struct DNSHeader {
     uint16_t id;
@@ -20,38 +20,89 @@ struct DNSHeader {
 };
 #pragma pack(pop)
 
+// -----------------------------------------------------------
+// Parsování QNAME z DNS dotazu (včetně základní podpory komprese)
+// -----------------------------------------------------------
 static std::string parse_qname(const uint8_t *data, size_t len, size_t &offset) {
     std::string name;
+    size_t jumped_offset = 0;
+    bool jumped = false;
+
     while (offset < len) {
-        uint8_t label_len = data[offset++];
-        if (label_len == 0)
+        uint8_t label_len = data[offset];
+
+        // 0xC0 = kompresní pointer (RFC1035 4.1.4)
+        if ((label_len & 0xC0) == 0xC0) {
+            if (offset + 1 >= len)
+                return "<invalid compression>";
+            uint16_t pointer = ((label_len & 0x3F) << 8) | data[offset + 1];
+            if (!jumped) {
+                jumped_offset = offset + 2;
+                jumped = true;
+            }
+            offset = pointer;
+            continue;
+        }
+
+        if (label_len == 0) {
+            offset++;
             break;
-        if (offset + label_len > len)
+        }
+
+        if (offset + 1 + label_len > len)
             return "<invalid>";
+
         if (!name.empty()) name += ".";
-        name.append(reinterpret_cast<const char*>(data + offset), label_len);
-        offset += label_len;
+        name.append(reinterpret_cast<const char*>(data + offset + 1), label_len);
+        offset += label_len + 1;
     }
+
+    if (jumped)
+        offset = jumped_offset;
+
     return name;
 }
 
+// -----------------------------------------------------------
+// Inicializace UDP socketů (IPv4 i IPv6) a příjem dotazů
+// -----------------------------------------------------------
 bool start_dns_server(const std::string &listen_addr, int port,
                       const std::unordered_set<std::string> &blocked,
                       bool verbose) {
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) {
-        print_error("Nepodařilo se vytvořit socket.");
+    struct addrinfo hints{}, *res, *p;
+    int sockfd = -1;
+
+    hints.ai_family = AF_UNSPEC;      // IPv4 i IPv6
+    hints.ai_socktype = SOCK_DGRAM;   // UDP
+    hints.ai_flags = AI_PASSIVE;      // naslouchací socket
+
+    std::string port_str = std::to_string(port);
+    int status = getaddrinfo(listen_addr.empty() ? nullptr : listen_addr.c_str(),
+                             port_str.c_str(), &hints, &res);
+    if (status != 0) {
+        print_error("getaddrinfo selhalo: " + std::string(gai_strerror(status)));
         return false;
     }
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    // Zkusíme bindnout první funkční adresu
+    for (p = res; p != nullptr; p = p->ai_next) {
+        sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (sockfd < 0) continue;
 
-    if (bind(sockfd, (sockaddr *)&addr, sizeof(addr)) < 0) {
-        print_error("Nepodařilo se bindnout socket. Zkuste jiný port (např. -p 8053).");
+        int yes = 1;
+        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == 0)
+            break;
+
         close(sockfd);
+        sockfd = -1;
+    }
+
+    freeaddrinfo(res);
+
+    if (sockfd < 0) {
+        print_error("Nepodařilo se bindnout socket (zkus jiný port např. -p 8053).");
         return false;
     }
 
@@ -60,7 +111,7 @@ bool start_dns_server(const std::string &listen_addr, int port,
     std::vector<uint8_t> buffer(512);
 
     while (true) {
-        sockaddr_in client{};
+        sockaddr_storage client{};
         socklen_t client_len = sizeof(client);
         ssize_t n = recvfrom(sockfd, buffer.data(), buffer.size(), 0,
                              (sockaddr *)&client, &client_len);
@@ -73,7 +124,13 @@ bool start_dns_server(const std::string &listen_addr, int port,
 
         const DNSHeader *hdr = reinterpret_cast<const DNSHeader *>(buffer.data());
         size_t offset = sizeof(DNSHeader);
+
         std::string qname = parse_qname(buffer.data(), n, offset);
+
+        if (offset + 4 > (size_t)n) {
+            print_error("Neplatná DNS otázka.");
+            continue;
+        }
 
         uint16_t qtype = ntohs(*(uint16_t *)(buffer.data() + offset));
         offset += 2;

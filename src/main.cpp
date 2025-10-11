@@ -1,10 +1,13 @@
 #include "filter.hpp"
 #include "util.hpp"
+#include "dns_server.hpp"
+
 #include <iostream>
 #include <string>
 #include <unordered_set>
 #include <cstdlib>
-#include "dns_server.hpp"
+#include <netdb.h>
+#include <cstring>
 
 // -----------------------------------------------------------
 // Struktura konfigurace
@@ -45,6 +48,29 @@ bool parse_args(int argc, char *argv[], Config &cfg) {
 }
 
 // -----------------------------------------------------------
+// Překlad adresy resolveru (IPv4/IPv6 nebo jméno)
+// -----------------------------------------------------------
+bool resolve_server_address(const std::string &host, int port,
+                            sockaddr_storage &out_addr, socklen_t &out_len)
+{
+    addrinfo hints{}, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    int ret = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res);
+    if (ret != 0) {
+        print_error("Nepodařilo se přeložit adresu resolveru: " + std::string(gai_strerror(ret)));
+        return false;
+    }
+
+    memcpy(&out_addr, res->ai_addr, res->ai_addrlen);
+    out_len = res->ai_addrlen;
+    freeaddrinfo(res);
+    return true;
+}
+
+// -----------------------------------------------------------
 // Hlavní funkce
 // -----------------------------------------------------------
 int main(int argc, char *argv[]) {
@@ -54,7 +80,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // --- Načtení blokovaných domén ---
     std::unordered_set<std::string> blocked;
     if (!load_filter_file(cfg.filter_file, blocked)) {
         print_error("Nepodařilo se načíst soubor s blokovanými doménami: " + cfg.filter_file);
@@ -63,13 +88,16 @@ int main(int argc, char *argv[]) {
 
     print_info("Načteno " + std::to_string(blocked.size()) + " blokovaných domén.", cfg.verbose);
 
-    // --- Testovací část (zatím) ---
+    sockaddr_storage resolver_addr{};
+    socklen_t resolver_addrlen = 0;
+    if (!resolve_server_address(cfg.server, cfg.port, resolver_addr, resolver_addrlen)) {
+        return EXIT_FAILURE;
+    }
+
+    // Testovací výpis
     std::string test_domains[] = {
-        "ads.google.com",
-        "example.com",
-        "bad.site",
-        "tracker.example.org",
-        "cdn.tracker.example.org"
+        "ads.google.com", "example.com", "bad.site",
+        "tracker.example.org", "cdn.tracker.example.org"
     };
 
     for (const auto &d : test_domains) {
@@ -77,9 +105,7 @@ int main(int argc, char *argv[]) {
         std::cout << d << " -> " << (blk ? "BLOCKED" : "OK") << std::endl;
     }
 
-    // --- Spuštění DNS serveru ---
-    start_dns_server("0.0.0.0", cfg.port, blocked, cfg.verbose);
-
-
+    // Spuštění DNS serveru (IPv4 + IPv6)
+    start_dns_server("::", cfg.port, blocked, cfg.verbose);
     return EXIT_SUCCESS;
 }
