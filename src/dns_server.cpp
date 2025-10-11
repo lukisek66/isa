@@ -1,5 +1,8 @@
 #include "dns_server.hpp"
 #include "util.hpp"
+#include "filter.hpp"
+
+
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
@@ -9,6 +12,7 @@
 #include <vector>
 
 // DNS hlavička
+/*
 #pragma pack(push, 1)
 struct DNSHeader {
     uint16_t id;
@@ -19,7 +23,7 @@ struct DNSHeader {
     uint16_t arcount;
 };
 #pragma pack(pop)
-
+*/
 // -----------------------------------------------------------
 // Parsování QNAME z DNS dotazu (včetně základní podpory komprese)
 // -----------------------------------------------------------
@@ -61,6 +65,35 @@ static std::string parse_qname(const uint8_t *data, size_t len, size_t &offset) 
         offset = jumped_offset;
 
     return name;
+}
+
+
+// ---------------------------------------------------------------
+// Příprava odpovědi při zjištění blokované domény, či né typu A
+// ---------------------------------------------------------------
+std::vector<uint8_t> build_error_response(const DNSHeader *hdr, const uint8_t *question, size_t qlen, uint16_t rcode) {
+    std::vector<uint8_t> resp(sizeof(DNSHeader) + qlen);
+
+    // kopíruj hlavičku a uprav flags
+    DNSHeader *res_hdr = reinterpret_cast<DNSHeader *>(resp.data());
+    *res_hdr = *hdr;
+
+    // Nastav QR (response), OPCODE stejný, RCODE = rcode
+    uint16_t flags = ntohs(hdr->flags);
+    flags |= 0x8000;         // QR = 1
+    flags &= 0xFFF0;         // vymaž starý RCODE
+    flags |= rcode & 0x000F; // nastav nový RCODE
+    res_hdr->flags = htons(flags);
+
+    // QDCOUNT = 1 (pokud byla otázka 1), AN/NS/AR = 0
+    res_hdr->ancount = 0;
+    res_hdr->nscount = 0;
+    res_hdr->arcount = 0;
+
+    // Kopíruj Question sekci
+    std::memcpy(resp.data() + sizeof(DNSHeader), question, qlen);
+
+    return resp;
 }
 
 // -----------------------------------------------------------
@@ -143,6 +176,27 @@ bool start_dns_server(const std::string &listen_addr, int port,
                       << " typ=" << qtype
                       << " class=" << qclass << std::endl;
         }
+
+        // Najdi začátek Question sekce pro kopírování
+        size_t qlen = offset - sizeof(DNSHeader);
+
+        // Pokud typ dotazu není A
+        if (qtype != 1) {
+            auto resp = build_error_response(hdr, buffer.data() + sizeof(DNSHeader), qlen, 4); // NOTIMP
+            sendto(sockfd, resp.data(), resp.size(), 0, (sockaddr *)&client, client_len);
+            if (verbose) std::cout << "[DNS] Odesláno NOTIMP" << std::endl;
+            continue;
+        }
+
+        // Pokud doména je blokovaná
+        if (is_blocked(qname, blocked)) {
+            auto resp = build_error_response(hdr, buffer.data() + sizeof(DNSHeader), qlen, 5); // REFUSED
+            sendto(sockfd, resp.data(), resp.size(), 0, (sockaddr *)&client, client_len);
+            if (verbose) std::cout << "[DNS] Odesláno REFUSED" << std::endl;
+            continue;
+        }
+
+        // Zde bude v budoucnu forwarding pro povolené dotazy typu A
     }
 
     close(sockfd);
