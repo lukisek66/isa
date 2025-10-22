@@ -14,13 +14,14 @@
 #include <mutex>
 #include <cstdlib>
 #include <random>
+#include <atomic>
+
+extern std::atomic<bool> running;
 
 // Globální generátor náhodných ID pro DNS forwarding
 static std::mt19937 rng(std::random_device{}());
 static std::uniform_int_distribution<uint16_t> id_distr(0, 0xFFFF);
 
-
-// parse_qname a build_error_response implementace (stejné jako dříve)
 // --- parse_qname ---
 static std::string parse_qname(const uint8_t *data, size_t len, size_t &offset) {
     std::string name;
@@ -46,7 +47,7 @@ static std::string parse_qname(const uint8_t *data, size_t len, size_t &offset) 
     return name;
 }
 
-// --- build_error_response (kopie z předchozích ukázek) ---
+// --- build_error_response ---
 std::vector<uint8_t> build_error_response(const DNSHeader *hdr, const uint8_t *question, size_t qlen, uint16_t rcode) {
     std::vector<uint8_t> resp(sizeof(DNSHeader) + qlen);
     DNSHeader *res_hdr = reinterpret_cast<DNSHeader *>(resp.data());
@@ -97,17 +98,15 @@ bool start_dns_server(const std::string &listen_addr, int port,
         return false;
     }
 
-    // Forwarder musí být inicializován před voláním start_dns_server (v main)
-    int ffd = forwarder_get_fd(); // může být -1, pokud forwarder není inicializován
-    if (ffd < 0) {
+    int ffd = forwarder_get_fd();
+    if (ffd < 0)
         print_info("Forwarder není inicializován — dotazy budou jen logovány.", verbose);
-    }
 
     print_info("DNS server běží na portu " + std::to_string(port), verbose);
 
     std::vector<uint8_t> buffer(4096);
 
-    while (true) {
+    while (running) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(client_sock, &fds);
@@ -117,96 +116,85 @@ bool start_dns_server(const std::string &listen_addr, int port,
             if (ffd > maxfd) maxfd = ffd;
         }
 
-        int ready = select(maxfd + 1, &fds, nullptr, nullptr, nullptr);
-        if (ready < 0) continue;
+        struct timeval tv{};
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
 
-        // 1) Příchozí odpověď od upstream resolveru
+        int ready = select(maxfd + 1, &fds, nullptr, nullptr, &tv);
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+
+        if (!running) break;
+
+        // 1️⃣ odpověď z upstream resolveru
         if (ffd >= 0 && FD_ISSET(ffd, &fds)) {
             sockaddr_storage from{};
             socklen_t from_len = sizeof(from);
             ssize_t rlen = recvfrom(ffd, buffer.data(), buffer.size(), 0,
                                     (sockaddr*)&from, &from_len);
             if (rlen > 0) {
-                // forwarder zpracuje odpověď a odešle ji klientovi
                 bool ok = forwarder_handle_response(buffer.data(), rlen, client_sock);
-                if (verbose && ok) std::cout << "[FORWARDER] Odpověď přeposlána klientovi" << std::endl;
+                if (verbose && ok)
+                    std::cout << "[FORWARDER] Odpověď přeposlána klientovi" << std::endl;
             }
         }
 
-        // 2) Příchozí dotaz od klienta
+        // 2️⃣ dotaz od klienta
         if (FD_ISSET(client_sock, &fds)) {
             sockaddr_storage client{};
             socklen_t client_len = sizeof(client);
             ssize_t n = recvfrom(client_sock, buffer.data(), buffer.size(), 0,
                                  (sockaddr*)&client, &client_len);
             if (n <= 0) continue;
-            if ((size_t)n < sizeof(DNSHeader)) {
-                print_error("Příchozí paket příliš krátký.");
-                continue;
-            }
+            if ((size_t)n < sizeof(DNSHeader)) continue;
 
             const DNSHeader *hdr = reinterpret_cast<const DNSHeader*>(buffer.data());
             size_t offset = sizeof(DNSHeader);
             std::string qname = parse_qname(buffer.data(), n, offset);
-            if (offset + 4 > (size_t)n) {
-                print_error("Neplatná DNS otázka.");
-                continue;
-            }
+            if (offset + 4 > (size_t)n) continue;
 
             uint16_t qtype = ntohs(*(uint16_t*)(buffer.data() + offset));
             offset += 2;
             uint16_t qclass = ntohs(*(uint16_t*)(buffer.data() + offset));
             offset += 2;
 
-            if (verbose) {
+            if (verbose)
                 std::cout << "[DNS] Dotaz ID=" << ntohs(hdr->id)
                           << " jméno=" << qname
                           << " typ=" << qtype
                           << " class=" << qclass << std::endl;
-            }
 
-            size_t qlen = offset - sizeof(DNSHeader); // délka question section
+            size_t qlen = offset - sizeof(DNSHeader);
 
-            // NOTIMP pro jiné typy než A
             if (qtype != 1) {
                 auto resp = build_error_response(hdr, buffer.data() + sizeof(DNSHeader), qlen, 4);
                 sendto(client_sock, resp.data(), resp.size(), 0, (sockaddr*)&client, client_len);
-                if (verbose) std::cout << "[DNS] Odesláno NOTIMP" << std::endl;
                 continue;
             }
 
-            // REFUSED pro blokované domény
             if (is_blocked(qname, blocked)) {
                 auto resp = build_error_response(hdr, buffer.data() + sizeof(DNSHeader), qlen, 5);
                 sendto(client_sock, resp.data(), resp.size(), 0, (sockaddr*)&client, client_len);
-                if (verbose) std::cout << "[DNS] Odesláno REFUSED" << std::endl;
                 continue;
             }
 
-            // Forward: změna ID a registrace u forwarderu
-            if (ffd < 0) {
-                if (verbose) std::cout << "[DNS] Forwarder není připraven; dotaz nebude přeposlán." << std::endl;
-                continue;
-            }
+            if (ffd < 0) continue;
 
-            // Vygeneruj nové ID (simple method; vylepšit dle potřeby)
-            uint16_t new_id = static_cast<uint16_t>(id_distr(rng) & 0xFFFF);
-            // Uložíme původní id a přepíšeme do bufferu
+            uint16_t new_id = id_distr(rng);
             uint16_t original_id = ntohs(hdr->id);
-            // nastavit nové id do bufferu (big-endian)
             buffer[0] = (new_id >> 8) & 0xFF;
             buffer[1] = new_id & 0xFF;
 
-            // Odešli a zaregistruj
             bool ok = forwarder_send_and_register(buffer.data(), n, new_id, client, client_len, original_id);
-            if (!ok) {
-                print_error("Nepodařilo se přeposlat dotaz na upstream resolver.");
-            } else {
-                if (verbose) std::cout << "[FORWARD] Dotaz odeslán upstream s novým ID=" << new_id << std::endl;
-            }
+            if (verbose && ok)
+                std::cout << "[FORWARD] Dotaz přeposlán upstream (ID=" << new_id << ")" << std::endl;
         }
     }
 
     close(client_sock);
+    if (ffd >= 0) close(ffd);
+    print_info("Server ukončen.", verbose);
     return true;
 }

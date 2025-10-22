@@ -11,7 +11,7 @@
 
 // Inicializace forwarderu: přeloží cfg.server a otevře socket pro upstream
 // Vrací true pokud OK.
-bool forwarder_init(const std::string &server, int port);
+bool forwarder_init(const std::string &server);
 
 // Vrátí fd socketu, který poslouchá odpovědi od upstreamu (přidat do select()).
 // Pokud není inicializován, vrací -1.

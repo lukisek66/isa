@@ -9,7 +9,14 @@
 #include <cstdlib>
 #include <netdb.h>
 #include <cstring>
+#include <csignal>
+#include <atomic>
+std::atomic<bool> running{true};
 
+
+void handle_sigint(int) {
+    running = false;
+}
 // -----------------------------------------------------------
 // Struktura konfigurace
 // -----------------------------------------------------------
@@ -75,6 +82,7 @@ bool resolve_server_address(const std::string &host, int port,
 // Hlavní funkce
 // -----------------------------------------------------------
 int main(int argc, char *argv[]) {
+    signal(SIGINT, handle_sigint);
     Config cfg;
     if (!parse_args(argc, argv, cfg)) {
         std::cerr << "Použití: dns -s server [-p port] -f filter_file [-v]\n";
@@ -108,7 +116,7 @@ int main(int argc, char *argv[]) {
     }
     //------------------------------------------------------------
 
-    if (!forwarder_init(cfg.server, cfg.port)) {
+    if (!forwarder_init(cfg.server)) {
     print_error("Nelze inicializovat forwarder na " + cfg.server);
     return EXIT_FAILURE;
     }

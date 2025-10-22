@@ -29,17 +29,16 @@ static std::mutex pending_mtx;
 static std::mt19937 rng((unsigned)std::chrono::high_resolution_clock::now().time_since_epoch().count());
 static std::uniform_int_distribution<uint32_t> id_distr(1, 0xFFFF);
 
-bool forwarder_init(const std::string &server, int port) {
+bool forwarder_init(const std::string &server) {
     if (server.empty()) {
         print_error("forwarder_init: prázdný server");
         return false;
     }
-
     struct addrinfo hints{}, *res = nullptr;
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
 
-    int rc = getaddrinfo(server.c_str(), std::to_string(port).c_str(), &hints, &res);
+    int rc = getaddrinfo(server.c_str(), std::to_string(53).c_str(), &hints, &res);
     if (rc != 0) {
         print_error(std::string("forwarder_init: getaddrinfo: ") + gai_strerror(rc));
         return false;
