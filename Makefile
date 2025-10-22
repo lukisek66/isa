@@ -3,7 +3,7 @@ CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -O2
 
 # Soubory projektu
-SRC := src/main.cpp src/filter.cpp src/dns_server.cpp
+SRC := src/main.cpp src/filter.cpp src/dns_server.cpp src/forwarder.cpp
 OBJ := $(SRC:.cpp=.o)
 TARGET := dns
 

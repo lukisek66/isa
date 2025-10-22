@@ -1,6 +1,7 @@
 #include "filter.hpp"
 #include "util.hpp"
 #include "dns_server.hpp"
+#include "forwarder.hpp"
 
 #include <iostream>
 #include <string>
@@ -95,6 +96,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Testovací výpis
+    //------------------------------------------------------------
     std::string test_domains[] = {
         "ads.google.com", "example.com", "bad.site",
         "tracker.example.org", "cdn.tracker.example.org"
@@ -104,6 +106,13 @@ int main(int argc, char *argv[]) {
         bool blk = is_blocked(d, blocked);
         std::cout << d << " -> " << (blk ? "BLOCKED" : "OK") << std::endl;
     }
+    //------------------------------------------------------------
+
+    if (!forwarder_init(cfg.server, cfg.port)) {
+    print_error("Nelze inicializovat forwarder na " + cfg.server);
+    return EXIT_FAILURE;
+    }
+
 
     // Spuštění DNS serveru (IPv4 + IPv6)
     start_dns_server("::", cfg.port, blocked, cfg.verbose);
