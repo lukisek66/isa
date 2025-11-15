@@ -17,6 +17,8 @@ bool forwarder_init(const std::string &server);
 // Pokud není inicializován, vrací -1.
 int forwarder_get_fd();
 
+uint16_t forwarder_generate_id();
+
 // Odešle paket na resolver a zaregistruje mapování new_id -> klient.
 // Vrací true pokud sendto() úspěšně odeslal paket (mapování je zaregistrováno).
 bool forwarder_send_and_register(const uint8_t *buf, size_t len,

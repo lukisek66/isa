@@ -18,10 +18,6 @@
 
 extern std::atomic<bool> running;
 
-// Globální generátor náhodných ID pro DNS forwarding
-static std::mt19937 rng(std::random_device{}());
-static std::uniform_int_distribution<uint16_t> id_distr(0, 0xFFFF);
-
 // --- parse_qname ---
 static std::string parse_qname(const uint8_t *data, size_t len, size_t &offset) {
     std::string name;
@@ -171,21 +167,29 @@ bool start_dns_server(const std::string &listen_addr, int port,
             if (qtype != 1) {
                 auto resp = build_error_response(hdr, buffer.data() + sizeof(DNSHeader), qlen, 4);
                 sendto(client_sock, resp.data(), resp.size(), 0, (sockaddr*)&client, client_len);
+                if (verbose){
+                    std::cout << "Wrong type" << std::endl;
+                }
                 continue;
             }
 
             if (is_blocked(qname, blocked)) {
                 auto resp = build_error_response(hdr, buffer.data() + sizeof(DNSHeader), qlen, 5);
                 sendto(client_sock, resp.data(), resp.size(), 0, (sockaddr*)&client, client_len);
+                if (verbose){
+                    std::cout << "Blocked" << std::endl;
+                }
                 continue;
             }
 
             if (ffd < 0) continue;
 
-            uint16_t new_id = id_distr(rng);
             uint16_t original_id = ntohs(hdr->id);
+            uint16_t new_id = forwarder_generate_id();     // <- nové deterministické ID
+
             buffer[0] = (new_id >> 8) & 0xFF;
             buffer[1] = new_id & 0xFF;
+
 
             bool ok = forwarder_send_and_register(buffer.data(), n, new_id, client, client_len, original_id);
             if (verbose && ok)

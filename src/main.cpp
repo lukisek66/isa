@@ -103,19 +103,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Testovací výpis
-    //------------------------------------------------------------
-    std::string test_domains[] = {
-        "ads.google.com", "example.com", "bad.site",
-        "tracker.example.org", "cdn.tracker.example.org"
-    };
-
-    for (const auto &d : test_domains) {
-        bool blk = is_blocked(d, blocked);
-        std::cout << d << " -> " << (blk ? "BLOCKED" : "OK") << std::endl;
-    }
-    //------------------------------------------------------------
-
     if (!forwarder_init(cfg.server)) {
     print_error("Nelze inicializovat forwarder na " + cfg.server);
     return EXIT_FAILURE;

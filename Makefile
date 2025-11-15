@@ -20,12 +20,13 @@ $(TARGET): $(OBJ)
 
 # Spuštění programu s ukázkovými parametry
 run: $(TARGET)
-	./$(TARGET) -s 8.8.8.8 -f blocked.txt -v
+	./$(TARGET) -s 1.1.1.1 -f blocked.txt -v
 
 # (Volitelně) spustí testy, až je vytvoříš
-test: $(TARGET)
+test: $(TARGET) $(TEST_FILTER)
 	@echo "==> Spouštím testy..."
-	@./$(TARGET) -s 8.8.8.8 -f blocked.txt -v
+	bash tests/test_main.sh
+	bash tests/test_dns_server.sh
 
 # Úklid po překladu
 clean:
