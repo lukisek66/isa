@@ -1,33 +1,31 @@
-# Kompilátor a příznaky
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -O2
 
-# Soubory projektu
 SRC := src/main.cpp src/filter.cpp src/dns_server.cpp src/forwarder.cpp
-OBJ := $(SRC:.cpp=.o)
+OBJ := src/main.o src/filter.o src/dns_server.o src/forwarder.o
 TARGET := dns
 
-# Výchozí cíl
 all: $(TARGET)
 
-# Linkování výsledného binárního souboru
+# Linkování
 $(TARGET): $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) $(OBJ) -o $(TARGET)
 
 # Překlad jednotlivých .cpp souborů
-%.o: %.cpp %.hpp
+src/main.o: src/main.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Spuštění programu s ukázkovými parametry
+src/filter.o: src/filter.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+src/dns_server.o: src/dns_server.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+src/forwarder.o: src/forwarder.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 run: $(TARGET)
 	./$(TARGET) -s 1.1.1.1 -f blocked.txt -v
 
-# (Volitelně) spustí testy, až je vytvoříš
-test: $(TARGET) $(TEST_FILTER)
-	@echo "==> Spouštím testy..."
-	bash tests/test_main.sh
-	bash tests/test_dns_server.sh
-
-# Úklid po překladu
 clean:
 	rm -f $(OBJ) $(TARGET)

@@ -11,25 +11,52 @@
 #include <cstring>
 #include <csignal>
 #include <atomic>
+
+/**
+ * @brief Globální flag pro běh programu.
+ *
+ * Slouží k indikaci, zda má hlavní smyčka běžet.
+ * Nastavuje se na false při zachycení SIGINT (Ctrl+C).
+ */
 std::atomic<bool> running{true};
 
-
+/**
+ * @brief Handler pro signál SIGINT.
+ *
+ * Nastaví flag `running` na false, aby se hlavní smyčka programu bezpečně ukončila.
+ *
+ * @param signo Číslo signálu (není využito)
+ */
 void handle_sigint(int) {
     running = false;
 }
-// -----------------------------------------------------------
-// Struktura konfigurace
-// -----------------------------------------------------------
+
+/**
+ * @brief Konfigurace programu z příkazové řádky.
+ *
+ * Obsahuje IP/hostname serveru, port, soubor s filtrem a verbose mód.
+ */
 struct Config {
-    std::string server;
-    int port = 53;
-    std::string filter_file;
-    bool verbose = false;
+    std::string server;      /**< IP adresa nebo hostname resolveru */
+    int port = 53;           /**< Port resolveru, defaultně 53 */
+    std::string filter_file; /**< Cesta k souboru s blokovanými doménami */
+    bool verbose = false;    /**< Flag pro zapnutí detailního výpisu */
 };
 
-// -----------------------------------------------------------
-// Zpracování argumentů příkazové řádky
-// -----------------------------------------------------------
+/**
+ * @brief Parsuje argumenty příkazové řádky.
+ *
+ * Podporované argumenty:
+ * - `-s <server>` : nastaví IP/hostname resolveru
+ * - `-p <port>`   : port dns filtru (volitelně, default 53)
+ * - `-f <file>`   : cesta k souboru s blokovanými doménami
+ * - `-v`          : zapnutí verbose módu
+ *
+ * @param argc Počet argumentů
+ * @param argv Pole argumentů
+ * @param cfg Výstupní struktura Config
+ * @return true pokud jsou argumenty validní, false jinak
+ */
 bool parse_args(int argc, char *argv[], Config &cfg) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -55,9 +82,17 @@ bool parse_args(int argc, char *argv[], Config &cfg) {
     return true;
 }
 
-// -----------------------------------------------------------
-// Překlad adresy resolveru (IPv4/IPv6 nebo jméno)
-// -----------------------------------------------------------
+/**
+ * @brief Přeloží hostname/IP adresu a port na sockaddr_storage.
+ *
+ * Podporuje IPv4 i IPv6 adresy.
+ *
+ * @param host Hostname nebo IP resolveru
+ * @param port __
+ * @param out_addr Výstupní adresa (sockaddr_storage)
+ * @param out_len Délka výstupní adresy
+ * @return true pokud byl překlad úspěšný, false jinak
+ */
 bool resolve_server_address(const std::string &host, int port,
                             sockaddr_storage &out_addr, socklen_t &out_len)
 {
@@ -78,9 +113,16 @@ bool resolve_server_address(const std::string &host, int port,
     return true;
 }
 
-// -----------------------------------------------------------
-// Hlavní funkce
-// -----------------------------------------------------------
+/**
+ * @brief Hlavní entry point programu.
+ *
+ * Inicializuje signal handler, načte konfiguraci a filtr, přeloží resolver adresu,
+ * inicializuje forwarder a spustí DNS server.
+ *
+ * @param argc Počet argumentů
+ * @param argv Pole argumentů
+ * @return EXIT_SUCCESS při úspěšném běhu, EXIT_FAILURE při chybě
+ */
 int main(int argc, char *argv[]) {
     signal(SIGINT, handle_sigint);
     Config cfg;
@@ -104,10 +146,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (!forwarder_init(cfg.server)) {
-    print_error("Nelze inicializovat forwarder na " + cfg.server);
-    return EXIT_FAILURE;
+        print_error("Nelze inicializovat forwarder na " + cfg.server);
+        return EXIT_FAILURE;
     }
-
 
     // Spuštění DNS serveru (IPv4 + IPv6)
     start_dns_server("::", cfg.port, blocked, cfg.verbose);
