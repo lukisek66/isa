@@ -142,7 +142,7 @@ static inline void buf_set_u16(uint8_t *p, uint16_t v) {
 }
 
 //zpracuje odpověď z upstreamu a pošle ji klientovi
-bool forwarder_handle_response(uint8_t *buf, ssize_t len, int client_sock) {
+bool forwarder_handle_response(uint8_t *buf, ssize_t len) {
     if (len < 12) return false; // Minimální délka DNS paketu
 
     uint16_t upstream_id = buf_get_u16(buf);

@@ -151,6 +151,6 @@ int main(int argc, char *argv[]) {
     }
 
     // Spuštění DNS serveru (IPv4 + IPv6)
-    start_dns_server("::", cfg.port, blocked, cfg.verbose);
+    start_dns_server(cfg.port, blocked, cfg.verbose);
     return EXIT_SUCCESS;
 }

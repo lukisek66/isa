@@ -50,6 +50,7 @@ uint16_t forwarder_generate_id();
  * @param client_addr Adresa klienta, na kterého se má odpověď poslat
  * @param client_len Délka adresy klienta
  * @param original_id Původní ID dotazu od klienta
+ * @param client_fd číslo soketu
  * @return true pokud `sendto()` úspěšně odeslal paket a mapování bylo zaregistrováno, false jinak
  */
 bool forwarder_send_and_register(const uint8_t *buf, size_t len,
@@ -67,9 +68,8 @@ bool forwarder_send_and_register(const uint8_t *buf, size_t len,
  *
  * @param buf Buffer obsahující obdržený DNS paket
  * @param len Délka bufferu
- * @param client_sock File descriptor socketu klienta
  * @return true pokud byla odpověď úspěšně doručena klientovi, false jinak
  */
-bool forwarder_handle_response(uint8_t *buf, ssize_t len, int client_sock);
+bool forwarder_handle_response(uint8_t *buf, ssize_t len);
 
 #endif // FORWARDER_HPP

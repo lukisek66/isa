@@ -58,7 +58,7 @@ std::vector<uint8_t> build_error_response(const DNSHeader *hdr, const uint8_t *q
 }
 
 // --- spustí DNS server (IPv4 + IPv6) ---
-bool start_dns_server(const std::string &listen_addr, int port,
+bool start_dns_server(int port,
                       const std::unordered_set<std::string> &blocked,
                       bool verbose) {
     std::vector<int> socks;
@@ -149,7 +149,7 @@ bool start_dns_server(const std::string &listen_addr, int port,
             ssize_t rlen = recvfrom(ffd, buffer.data(), buffer.size(), 0,
                                     (sockaddr*)&from, &from_len);
             if (rlen > 0) {
-                bool ok = forwarder_handle_response(buffer.data(), rlen, socks[0]);
+                bool ok = forwarder_handle_response(buffer.data(), rlen);
                 if (verbose && ok)
                     std::cout << "[FORWARDER] Odpověď přeposlána klientovi" << std::endl;
             }

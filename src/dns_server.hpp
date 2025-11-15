@@ -30,13 +30,12 @@ struct DNSHeader {
  * Server poslouchá na zadané adrese a portu, kontroluje dotazy proti seznamu blokovaných domén
  * a předává dotazy na forwarder. Podporuje IPv4 i IPv6.
  *
- * @param listen_addr Adresa, na které server naslouchá (např. "::" pro IPv6 a IPv4)
  * @param port Port, na kterém server naslouchá
  * @param blocked Set blokovaných domén, pro které bude server generovat NXDOMAIN nebo chybu
  * @param verbose Pokud je true, vypisuje detailní informace o dotazech a odpovědích
  * @return true pokud se server úspěšně spustil, false při chybě
  */
-bool start_dns_server(const std::string &listen_addr, int port,
+bool start_dns_server(int port,
                       const std::unordered_set<std::string> &blocked,
                       bool verbose);
 
